@@ -1,0 +1,20 @@
+# 生成的 HTML 幻灯片（由 generate_decks.py 重新生成）
+decks/EP0*/
+decks/index.html
+decks/assets/
+
+# 渲染产物：截图 / 配音 / 分片 / 成片
+pipeline/EP0*/
+pipeline/demo/
+pipeline/*.mp4
+pipeline/**/concat_list.txt
+pipeline/**/series_concat_list.txt
+pipeline/**/*.mp3
+pipeline/**/*.png
+pipeline/**/*.in.txt
+
+# 本地临时
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

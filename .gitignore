@@ -1,0 +1,66 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+out/
+dist/
+release/
+docs-site/.vitepress/cache/
+docs-site/.vitepress/dist/
+*.asar
+
+# Electron/Vite
+.vite/
+.cache/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Local artifacts
+*.local
+# 本地下载/导入的临时文件不参与版本发布，避免把用户机器上的产物打进 tag。
+downloads/
+
+.pi-lens
+.pi/
+.pi-subagents/
+
+# Local collaboration notes are machine/user-specific and must never be committed or proposed for a PR.
+docs/PiDeck-协作说明.md
+
+# Cloned source for reference
+opencode-source/
+nul
+
+
+*.tsbuildinfo
+
+# 视频制作产物（源脚本与说明见 video-series/；详细规则见 video-series/.gitignore）
+video-series/decks/EP0*/
+video-series/decks/index.html
+video-series/decks/assets/
+video-series/pipeline/EP0*/
+video-series/pipeline/demo/
+video-series/pipeline/*.mp4

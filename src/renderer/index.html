@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob: https://cloudcache.tencent-cloud.com https://skillhub-1388575217.cos.accelerate.myqcloud.com; font-src 'self' data:; connect-src 'self' ws: http://127.0.0.1:* http://localhost:* https://api.skillhub.cn"
+    />
+    <title></title>
+    <style>
+      /* 启动画面：独立于 #root，React 挂载后淡出移除。
+         字体用与空状态相同的 PiDeckPlantin，保证 PiDeck / 副标题气质一致。 */
+      @font-face {
+        font-family: "PiDeckPlantin";
+        src: url("./src/assets/fonts/PlantinNowVariable-Upright.woff2") format("woff2");
+        font-style: normal;
+        font-weight: 300 900;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "PiDeckPlantin";
+        src: url("./src/assets/fonts/PlantinNowVariable-Italic.woff2") format("woff2");
+        font-style: italic;
+        font-weight: 300 900;
+        font-display: swap;
+      }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        height: 100%;
+        overflow: hidden;
+        background: #eef0f3;
+      }
+
+      #boot-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background:
+          radial-gradient(1200px 600px at 50% 28%, rgba(26, 158, 60, 0.10), transparent 62%),
+          linear-gradient(180deg, #f5f6f3 0%, #eef0f3 55%, #e9ebe7 100%);
+        transition: opacity 420ms cubic-bezier(0.22, 1, 0.36, 1), transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+        will-change: opacity, transform;
+      }
+      #boot-overlay.fade-out {
+        opacity: 0;
+        transform: scale(1.02);
+        pointer-events: none;
+      }
+
+      .boot-brand {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+        max-width: min(720px, calc(100vw - 48px));
+        padding: 0 16px;
+        animation: boot-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+      }
+
+      /* 官方 pi 像素 logo 动画画布：无绿底方块，与侧栏 PiLogoCanvas 同源拼装效果 */
+      .boot-logo-canvas {
+        width: 148px;
+        height: 148px;
+        display: block;
+        image-rendering: pixelated;
+        filter: drop-shadow(0 12px 28px rgba(15, 23, 42, 0.14));
+      }
+
+      /* 与空状态 empty-tagline 同族：品牌衬线、大字、紧字距 */
+      .boot-title {
+        color: #202124;
+        font-family: "PiDeckPlantin", Georgia, "Times New Roman", serif;
+        font-size: clamp(36px, 5vw, 56px);
+        font-weight: 600;
+        letter-spacing: -0.03em;
+        line-height: 1.08;
+        text-align: center;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+      /* 与 empty-subtitle 同族：同衬线、次级灰度、更大行距 */
+      .boot-subtitle {
+        color: #5f6368;
+        font-family: "PiDeckPlantin", Georgia, "Times New Roman", serif;
+        font-size: clamp(17px, 1.8vw, 22px);
+        font-weight: 500;
+        letter-spacing: 0;
+        line-height: 1.55;
+        text-align: center;
+        text-wrap: balance;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .boot-progress {
+        width: 120px;
+        height: 3px;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.08);
+        overflow: hidden;
+        animation: boot-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
+      }
+      .boot-progress-bar {
+        width: 42%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #1a9e3c, #22c55e);
+        animation: boot-progress 1.15s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+      }
+
+      @keyframes boot-rise {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @keyframes boot-progress {
+        0% {
+          transform: translateX(-120%);
+        }
+        100% {
+          transform: translateX(280%);
+        }
+      }
+
+      @media (prefers-color-scheme: dark) {
+        html, body {
+          background: #111315;
+        }
+        #boot-overlay {
+          background:
+            radial-gradient(1000px 520px at 50% 30%, rgba(34, 197, 94, 0.12), transparent 60%),
+            linear-gradient(180deg, #15181b 0%, #111315 100%);
+        }
+        .boot-title {
+          color: #eceff3;
+        }
+        .boot-subtitle {
+          color: #b9c0c8;
+        }
+        .boot-progress {
+          background: rgba(255, 255, 255, 0.08);
+        }
+        .boot-logo-canvas {
+          filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.35));
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .boot-brand,
+        .boot-progress,
+        .boot-progress-bar {
+          animation: none !important;
+        }
+        #boot-overlay {
+          transition-duration: 120ms;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- 启动画面覆盖层：React 挂载后通过 fade-out 动画淡出再移除 -->
+    <div id="boot-overlay">
+      <div class="boot-brand">
+        <canvas id="boot-logo-canvas" class="boot-logo-canvas" width="148" height="148" aria-hidden="true"></canvas>
+        <strong class="boot-title">PiDeck</strong>
+        <span class="boot-subtitle">正在启动工作台…</span>
+      </div>
+      <div class="boot-progress" aria-hidden="true">
+        <div class="boot-progress-bar"></div>
+      </div>
+    </div>
+    <!-- 启动 logo 动画：在 React 之前循环播放官方 pi 拼装效果 -->
+    <script type="module" src="/src/boot-logo.ts"></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

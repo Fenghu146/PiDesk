@@ -1,0 +1,118 @@
+/* ── 文件图标模块样式（独立注入，避免在超大 styles.css 中反复丢失） ── */
+
+:root {
+  /* 文件图标使用稳定的 CSS 像素尺寸；系统缩放会自动适配高 DPI，面板宽度变化只影响文件名区域。 */
+  --file-type-icon-size: 20px;
+  --file-icon-blue: #519aba;
+  --file-icon-cyan: #38a3a5;
+  --file-icon-green: #80a665;
+  --file-icon-grey: #8e9eab;
+  --file-icon-grey-light: #b0bac5;
+  --file-icon-orange: #c5823e;
+  --file-icon-pink: #c7638a;
+  --file-icon-purple: #a074c4;
+  --file-icon-red: #cc5a4c;
+  --file-icon-white: #d1d5db;
+  --file-icon-yellow: #c9a63b;
+  --file-icon-ignore: #8e9eab;
+  --file-icon-default: #8e9eab;
+  --file-icon-folder: #80a665;
+  --file-icon-folder-open: #80a665;
+  --file-icon-folder-special: #519aba;
+  --file-node-type-label-color: var(--color-text-tertiary);
+  --file-node-git-added: #57ab5a;
+  --file-node-git-modified: #c69026;
+  --file-node-git-deleted: #e5534b;
+  --file-node-git-renamed: #519aba;
+}
+
+:root[data-theme="dark"] {
+  --file-icon-blue: #7ac4e0;
+  --file-icon-cyan: #56b6c2;
+  --file-icon-green: #90c27d;
+  --file-icon-grey: #a0aab4;
+  --file-icon-grey-light: #c0c9d2;
+  --file-icon-orange: #e0a65c;
+  --file-icon-pink: #e07ba0;
+  --file-icon-purple: #b392dc;
+  --file-icon-red: #e06c6c;
+  --file-icon-white: #e0e4e9;
+  --file-icon-yellow: #d4b84c;
+  --file-icon-ignore: #a0aab4;
+  --file-icon-default: #a0aab4;
+  --file-icon-folder: #90c27d;
+  --file-icon-folder-open: #90c27d;
+  --file-icon-folder-special: #7ac4e0;
+}
+
+/* ── 文件树行（覆盖原 2 列 grid 为 3 列，容纳类型标签） ── */
+.files-panel {
+  container-type: inline-size;
+}
+.file-node-row {
+  grid-template-columns: 22px minmax(0, 1fr) auto !important;
+}
+
+/* 窄抽屉优先保证文件名可读；图标保持稳定尺寸，类型仍可通过 title 查看。 */
+@container (max-width: 340px) {
+  .file-node-row {
+    grid-template-columns: 22px minmax(0, 1fr) !important;
+  }
+  .file-node-type-label {
+    display: none;
+  }
+}
+
+/* ── 文件图标容器 ── */
+.file-node-icon {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+/* ── seti-icons SVG 图标 ── */
+.file-node-seti-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--file-type-icon-size);
+  height: var(--file-type-icon-size);
+  color: inherit;
+}
+.file-node-seti-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+/* ── Git 状态小圆点 ── */
+.file-node-git-badge {
+  position: absolute;
+  top: -1px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-bg-panel);
+  pointer-events: none;
+}
+.file-node-git-badge.git-added    { background: var(--file-node-git-added); }
+.file-node-git-badge.git-modified { background: var(--file-node-git-modified); }
+.file-node-git-badge.git-deleted  { background: var(--file-node-git-deleted); }
+.file-node-git-badge.git-renamed  { background: var(--file-node-git-renamed); }
+
+/* ── 文件类型标签（hover 显示） ── */
+.file-node-type-label {
+  font-size: var(--font-size-micro);
+  color: var(--file-node-type-label-color);
+  font-family: var(--font-family-business);
+  font-weight: 400;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  padding-right: var(--space-1);
+  white-space: nowrap;
+}
+.file-node-row:hover .file-node-type-label {
+  opacity: 1;
+}

@@ -1,0 +1,8 @@
+# PiDeck 视频制作工作流依赖
+edge-tts>=6.1.0
+playwright>=1.40.0
+
+# 系统还需：
+# - ffmpeg（PATH 可用）
+# - Chromium：python -m playwright install chromium
+#   若本机已有 ms-playwright chromium，脚本会自动探测
