@@ -198,7 +198,7 @@ const OpenCodeImportModal = lazy(() => import("./components/app/ImportModals").t
 const ProjectResourcesModal = lazy(() => import("./components/app/ProjectResourcesModal").then((m) => ({ default: m.ProjectResourcesModal })));
 const UpdateErrorModalLazy = lazy(() => import("./components/app/UpdateModals").then((m) => ({ default: m.UpdateErrorModal })));
 const UpToDateModalLazy = lazy(() => import("./components/app/UpdateModals").then((m) => ({ default: m.UpToDateModal })));
-import { createDefaultExternalEditorSettings } from "../../shared/types";
+import { createDefaultAppSettings } from "../../shared/defaultSettings";
 import type {
   AgentRuntimeState,
   AgentTab,
@@ -1288,70 +1288,12 @@ export function App() {
   /** 加载更多历史消息前的滚动锚点（旧 scrollHeight + scrollTop），用于渲染后按顶部锚定恢复滚动位置。 */
   const loadMoreAnchorRef = useRef<{ height: number; top: number } | null>(null);
 
-  const [settings, setSettings] = useState<AppSettings>({
+  const [settings, setSettings] = useState<AppSettings>(() => ({
+    ...createDefaultAppSettings(),
+    // 首屏差异：渲染进程默认使用系统标题栏，commit 提示词等主进程 settings 加载后覆盖
     useNativeTitleBar: true,
-    showNativeMenu: false,
-    sendShortcut: "enter-send",
-    theme: "system",
-    lightBackground: "white",
-    language: "system",
-    startupWindowMode: "maximized",
-    piEnvironmentChecked: false,
-    enableGitManagement: true,
     gitCommitMessagePrompt: "",
-    closeToTray: true,
-    singleInstance: true,
-    enableNotifications: true,
-    // showThinking 由 pi agent 的 hideThinkingBlock 控制，启动后从主进程加载的真实值会覆盖此处
-    showThinking: true,
-    showDevTools: false,
-    // Electron Chromium 沙箱默认关，与主进程历史兼容策略一致
-    electronChromiumSandbox: false,
-    piProxyEnabled: false,
-    piProxyUrl: "http://127.0.0.1:7890",
-    piProxyBypass: "localhost,127.0.0.1,::1",
-    desktopProxyEnabled: false,
-    desktopProxyUrl: "http://127.0.0.1:7890",
-    desktopProxyBypass: "localhost,127.0.0.1,::1",
-    customPiPath: "",
-    wslEnabled: false,
-    wslDistro: "Ubuntu",
-    wslUser: "root",
-    telemetryEnabled: true,
-    webServiceEnabled: false,
-    webServiceHost: "0.0.0.0",
-    webServicePort: 8765,
-    rpcTimeout: 600_000,
-    linkOpenMode: "external",
-    contentMaxWidth: 1400,
-    maxEditorFileSizeMB: 5,
-    externalEditors: createDefaultExternalEditorSettings(),
-
-    // 桌面宠物默认关闭：关闭后应用与现状完全一致，零回归
-    petEnabled: false,
-    petId: "clawd",
-    petAlwaysOnTop: true,
-    petScale: 0.8,
-    petPatrolEnabled: true,
-    petPatrolPauseMin: 5,
-    favoriteModels: [],
-
-    // 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁
-    fontSize: "default",
-    uiFontSize: null,
-    chatFontSize: null,
-    inputFontSize: null,
-    zoomFactor: 1,
-    fontFamilyBase: "system",
-    fontFamilyBaseCustom: "",
-    fontFamilyMono: "commit-mono",
-    fontFamilyMonoCustom: "",
-    removedBuiltInExtensions: [],
-    disableUpdateCheck: false,
-    piRpcOffline: true,
-    piRpcNoExtensions: false,
-    piRpcNoSkills: false,
-  });
+  }));
   /* settingsNotice 已改用 showToast (app-notice) 实现 */
   const [piProxyNotice, setPiProxyNotice] = useState("");
   const [piProxyNoticeTone, setPiProxyNoticeTone] = useState<

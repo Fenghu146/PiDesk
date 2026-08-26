@@ -1,7 +1,6 @@
 import { app } from "electron";
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, stat, writeFile, readFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
@@ -10,6 +9,16 @@ import type {
 	OpenCodeImportStatus,
 	OpenCodeSessionSummary,
 } from "../../shared/types";
+import {
+	cleanSessionTitle,
+	extractPiText,
+	makeEntryId,
+	normalizeSessionPath,
+	projectSessionDir,
+	readImportMeta,
+	sha1Hash,
+	stringifyToolOutput,
+} from "./importerShared";
 
 type OpenCodeMessage = {
 	id: string;
@@ -35,6 +44,11 @@ type ParsedOpenCodeSession = {
 	sourceSize: number;
 	sourceMtime: number;
 };
+
+/** OpenCode 导入器写入的标记类型，用于回读判断源文件是否更新 */
+function readOpenCodeImportMeta(targetPath: string) {
+	return readImportMeta(targetPath, "opencode_import");
+}
 
 export class OpenCodeSessionImporter {
 	private readonly openCodeDb = join(app.getPath("home"), ".local", "share", "opencode", "opencode.db");
@@ -65,9 +79,9 @@ export class OpenCodeSessionImporter {
 		try {
 			if (!parsed) throw new Error("OpenCode session not found in database");
 			const targetPath = this.getTargetPath(projectPath, parsed);
-			const existing = await this.readImportMeta(targetPath);
+			const existing = await readOpenCodeImportMeta(targetPath);
 			const converted = this.convertToPiSession(projectPath, parsed);
-			await mkdir(this.getProjectSessionDir(projectPath), { recursive: true });
+			await mkdir(projectSessionDir(this.piRoot, projectPath), { recursive: true });
 			// OpenCode 历史集中存放在 SQLite 中；导入时只生成 pi 可读副本，不修改原始数据库。
 			await writeFile(targetPath, converted.raw, "utf8");
 			return {
@@ -91,7 +105,7 @@ export class OpenCodeSessionImporter {
 
 	private async toSummary(session: ParsedOpenCodeSession, projectPath: string): Promise<OpenCodeSessionSummary> {
 		const targetPath = this.getTargetPath(projectPath, session);
-		const importMeta = await this.readImportMeta(targetPath);
+		const importMeta = await readOpenCodeImportMeta(targetPath);
 		const converted = this.convertToPiSession(projectPath, session);
 		const status: OpenCodeImportStatus = !importMeta
 			? "new"
@@ -128,7 +142,7 @@ export class OpenCodeSessionImporter {
 		const pushEntry = (entry: Record<string, unknown>) => lines.push(JSON.stringify(entry));
 		const pushMessage = (role: "user" | "assistant" | "toolResult", content: unknown[], extra: Record<string, unknown> = {}, timestampValue?: number) => {
 			if (content.length === 0) return;
-			const id = this.makeId(sessionId, sequence++);
+			const id = makeEntryId(sessionId, sequence++);
 			const messageTimestamp = Number(timestampValue ?? session.sourceMtime + sequence);
 			pushEntry({
 				type: "message",
@@ -146,9 +160,9 @@ export class OpenCodeSessionImporter {
 			parentId = id;
 			messageCount += 1;
 
-			const text = this.extractPiText(content).trim();
+			const text = extractPiText(content).trim();
 			if (text && !titleState.preview) titleState.preview = text.slice(0, 160);
-			if (role === "user" && text && !titleState.title) titleState.title = this.cleanTitle(text);
+			if (role === "user" && text && !titleState.title) titleState.title = cleanSessionTitle(text);
 		};
 
 		pushEntry({ type: "session", version: 3, id: sessionId, timestamp, cwd: projectPath });
@@ -161,7 +175,7 @@ export class OpenCodeSessionImporter {
 			sourceSize: session.sourceSize,
 			importedAt: new Date().toISOString(),
 		});
-		const modelChangeId = this.makeId(sessionId, sequence++);
+		const modelChangeId = makeEntryId(sessionId, sequence++);
 		pushEntry({
 			type: "model_change",
 			id: modelChangeId,
@@ -209,7 +223,7 @@ export class OpenCodeSessionImporter {
 			}
 		}
 
-		const title = this.cleanTitle(String(session.meta.title ?? "")) || titleState.title || this.cleanTitle(basename(session.sourcePath)) || "OpenCode 会话";
+		const title = cleanSessionTitle(String(session.meta.title ?? "")) || titleState.title || cleanSessionTitle(basename(session.sourcePath)) || "OpenCode 会话";
 		lines.splice(1, 0, JSON.stringify({ sessionName: title, cwd: projectPath }));
 		return {
 			raw: `${lines.join("\n")}\n`,
@@ -221,7 +235,7 @@ export class OpenCodeSessionImporter {
 
 	private async readOpenCodeSessions(projectPath: string): Promise<ParsedOpenCodeSession[]> {
 		const info = await stat(this.openCodeDb);
-		const normalizedProject = this.normalize(projectPath);
+		const normalizedProject = normalizeSessionPath(projectPath);
 		const db = new DatabaseSync(this.openCodeDb, { readOnly: true });
 		try {
 			const sessions = db.prepare(`
@@ -299,67 +313,22 @@ export class OpenCodeSessionImporter {
 		};
 	}
 
-	private async readImportMeta(targetPath: string) {
-		try {
-			const raw = await readFile(targetPath, "utf8");
-			for (const line of raw.split(/\r?\n/).filter(Boolean).slice(0, 8)) {
-				const entry = JSON.parse(line) as any;
-				if (entry.type === "opencode_import") {
-					return { sourceMtime: Number(entry.sourceMtime), sourceSize: Number(entry.sourceSize) };
-				}
-			}
-		} catch {
-			return undefined;
-		}
-		return undefined;
-	}
 
 	private getTargetPath(projectPath: string, session: ParsedOpenCodeSession) {
-		const id = String(session.meta.id ?? this.hash(session.sourcePath)).replace(/[^a-zA-Z0-9_-]/g, "-");
-		return join(this.getProjectSessionDir(projectPath), `opencode_${id}.jsonl`);
+		const id = String(session.meta.id ?? sha1Hash(session.sourcePath)).replace(/[^a-zA-Z0-9_-]/g, "-");
+		return join(projectSessionDir(this.piRoot, projectPath), `opencode_${id}.jsonl`);
 	}
 
-	private getProjectSessionDir(projectPath: string) {
-		return join(this.piRoot, this.safePathToken(projectPath));
-	}
 
-	private safePathToken(path: string) {
-		const normalized = path.replace(/\\/g, "/");
-		const win = normalized.match(/^([A-Za-z]):\/(.+)$/);
-		if (win) return `--${win[1]}--${win[2].replace(/\//g, "-")}--`;
-		return `--${normalized.replace(/^\//, "").replace(/\//g, "-")}--`;
-	}
 
 	private extractToolOutput(part: Record<string, any>) {
 		const state = part.state ?? {};
 		const output = state.output ?? state.error ?? part.output ?? "";
-		if (typeof output === "string") return output;
-		try {
-			return JSON.stringify(output ?? "", null, 2);
-		} catch {
-			return String(output ?? "");
-		}
+		return stringifyToolOutput(output);
 	}
 
-	private extractPiText(content: unknown[]) {
-		return content.map((item: any) => item?.text ?? item?.thinking ?? item?.name ?? "").filter(Boolean).join(" ");
-	}
 
-	private cleanTitle(value?: string) {
-		const text = value?.replace(/\s+/g, " ").trim();
-		if (!text || /^untitled$/i.test(text)) return "";
-		return text.length > 40 ? `${text.slice(0, 40)}...` : text;
-	}
 
-	private makeId(sessionId: string, sequence: number) {
-		return this.hash(`${sessionId}:${sequence}`).slice(0, 8);
-	}
 
-	private hash(value: string) {
-		return createHash("sha1").update(value).digest("hex");
-	}
 
-	private normalize(path?: string) {
-		return String(path ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-	}
 }

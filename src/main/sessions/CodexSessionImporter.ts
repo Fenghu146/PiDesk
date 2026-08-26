@@ -1,6 +1,5 @@
 import { app } from "electron";
-import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type {
 	CodexImportReport,
@@ -9,6 +8,18 @@ import type {
 	CodexSessionSummary,
 } from "../../shared/types";
 import { getCodexSessionThreadInfo } from "../../shared/codexSessionMeta";
+import {
+	cleanSessionTitle,
+	collectJsonlFiles,
+	extractPiText,
+	makeEntryId,
+	normalizeSessionPath,
+	projectSessionDir,
+	readImportMeta,
+	sha1Hash,
+	stringifyToolOutput,
+	zeroUsage,
+} from "./importerShared";
 
 type ParsedCodexSession = {
 	meta: Record<string, any>;
@@ -18,21 +29,26 @@ type ParsedCodexSession = {
 	sourceMtime: number;
 };
 
+/** Codex 导入器写入的标记类型，用于回读判断源文件是否更新 */
+function readCodexImportMeta(targetPath: string) {
+	return readImportMeta(targetPath, "codex_import");
+}
+
 export class CodexSessionImporter {
 	private readonly codexRoot = join(app.getPath("home"), ".codex", "sessions");
 	private readonly piRoot = join(app.getPath("home"), ".pi", "agent", "sessions");
 
 	async scan(projectPath: string): Promise<CodexSessionSummary[]> {
-		const files = await this.collectJsonl(this.codexRoot).catch(() => []);
+		const files = await collectJsonlFiles(this.codexRoot).catch(() => []);
 		const sessions = await Promise.all(
 			files.map((file) => this.readCodexSession(file).catch(() => null)),
 		);
-		const normalizedProject = this.normalize(projectPath);
+		const normalizedProject = normalizeSessionPath(projectPath);
 
 		const summaries = await Promise.all(
 			sessions
 				.filter((session): session is ParsedCodexSession => Boolean(session))
-				.filter((session) => this.normalize(session.meta.cwd) === normalizedProject)
+				.filter((session) => normalizeSessionPath(session.meta.cwd) === normalizedProject)
 				.map((session) => this.toSummary(session, projectPath)),
 		);
 
@@ -57,15 +73,15 @@ export class CodexSessionImporter {
 	): Promise<CodexImportResult> {
 		try {
 			const parsed = await this.readCodexSession(sourcePath);
-			const sourceCwd = this.normalize(parsed.meta.cwd);
-			if (sourceCwd !== this.normalize(projectPath)) {
+			const sourceCwd = normalizeSessionPath(parsed.meta.cwd);
+			if (sourceCwd !== normalizeSessionPath(projectPath)) {
 				throw new Error("Codex session cwd does not match selected project");
 			}
 
 			const targetPath = this.getTargetPath(projectPath, parsed);
-			const existing = await this.readImportMeta(targetPath);
+			const existing = await readCodexImportMeta(targetPath);
 			const converted = this.convertToPiSession(projectPath, parsed);
-			await mkdir(this.getProjectSessionDir(projectPath), { recursive: true });
+			await mkdir(projectSessionDir(this.piRoot, projectPath), { recursive: true });
 			// 目标路径由 Codex session id 决定；重复导入覆盖同一个副本，保留原始 Codex JSONL 不动。
 			await writeFile(targetPath, converted.raw, "utf8");
 
@@ -93,7 +109,7 @@ export class CodexSessionImporter {
 		projectPath: string,
 	): Promise<CodexSessionSummary> {
 		const targetPath = this.getTargetPath(projectPath, session);
-		const importMeta = await this.readImportMeta(targetPath);
+		const importMeta = await readCodexImportMeta(targetPath);
 		const converted = this.convertToPiSession(projectPath, session);
 		const status: CodexImportStatus = !importMeta
 			? "new"
@@ -125,7 +141,7 @@ export class CodexSessionImporter {
 	}
 
 	private convertToPiSession(projectPath: string, session: ParsedCodexSession) {
-		const sessionId = String(session.meta.id ?? this.hash(session.sourcePath));
+		const sessionId = String(session.meta.id ?? sha1Hash(session.sourcePath));
 		const threadInfo = getCodexSessionThreadInfo(session.meta);
 		const timestamp = new Date(
 			Date.parse(String(session.meta.timestamp ?? "")) || session.sourceMtime,
@@ -149,7 +165,7 @@ export class CodexSessionImporter {
 			timestampValue?: unknown,
 		) => {
 			if (content.length === 0) return;
-			const id = this.makeId(sessionId, sequence++);
+			const id = makeEntryId(sessionId, sequence++);
 			const messageTimestamp =
 				this.parseTimestamp(timestampValue) ?? session.sourceMtime + sequence;
 			const ts = new Date(messageTimestamp).toISOString();
@@ -163,17 +179,17 @@ export class CodexSessionImporter {
 					content,
 					timestamp: messageTimestamp,
 					// pi 的上下文统计会读取 assistant.usage.totalTokens；Codex 原始历史没有该字段，导入时用 0 值占位保证可继续对话。
-					...(role === "assistant" ? { usage: this.zeroUsage() } : {}),
+					...(role === "assistant" ? { usage: zeroUsage() } : {}),
 					...extra,
 				},
 			});
 			parentId = id;
 			messageCount += 1;
 
-			const text = this.extractPiText(content).trim();
+			const text = extractPiText(content).trim();
 			if (text && !titleState.preview) titleState.preview = text.slice(0, 160);
 			if (role === "user" && text && !titleState.title) {
-				titleState.title = this.cleanTitle(text);
+				titleState.title = cleanSessionTitle(text);
 			}
 		};
 
@@ -197,7 +213,7 @@ export class CodexSessionImporter {
 			agentRole: threadInfo.agentRole,
 			agentNickname: threadInfo.agentNickname,
 		});
-		const modelChangeId = this.makeId(sessionId, sequence++);
+		const modelChangeId = makeEntryId(sessionId, sequence++);
 		pushEntry({
 			type: "model_change",
 			id: modelChangeId,
@@ -248,7 +264,7 @@ export class CodexSessionImporter {
 			}
 
 			if (payload.type === "function_call") {
-				const callId = String(payload.call_id ?? payload.id ?? this.makeId(sessionId, sequence));
+				const callId = String(payload.call_id ?? payload.id ?? makeEntryId(sessionId, sequence));
 				const toolName = String(payload.name ?? "tool");
 				toolNames.set(callId, toolName);
 				const callStartedAt = this.parseTimestamp(entry.timestamp);
@@ -276,7 +292,7 @@ export class CodexSessionImporter {
 			}
 
 			if (payload.type === "function_call_output") {
-				const callId = String(payload.call_id ?? payload.id ?? this.makeId(sessionId, sequence));
+				const callId = String(payload.call_id ?? payload.id ?? makeEntryId(sessionId, sequence));
 				const output = this.extractToolOutput(payload);
 				const completedAt = this.parseTimestamp(entry.timestamp);
 				const startedAt = toolStartedAt.get(callId);
@@ -305,7 +321,7 @@ export class CodexSessionImporter {
 			]);
 		}
 
-		const title = titleState.title || this.cleanTitle(basename(session.sourcePath)) || "Codex 会话";
+		const title = titleState.title || cleanSessionTitle(basename(session.sourcePath)) || "Codex 会话";
 		lines.splice(1, 0, JSON.stringify({ sessionName: title, cwd: projectPath }));
 
 		return {
@@ -316,16 +332,6 @@ export class CodexSessionImporter {
 		};
 	}
 
-	private zeroUsage() {
-		return {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		};
-	}
 
 	private async readCodexSession(filePath: string): Promise<ParsedCodexSession> {
 		this.assertCodexSourcePath(filePath);
@@ -346,57 +352,21 @@ export class CodexSessionImporter {
 	}
 
 	private assertCodexSourcePath(filePath: string) {
-		const root = this.normalize(this.codexRoot);
-		const target = this.normalize(filePath);
+		const root = normalizeSessionPath(this.codexRoot);
+		const target = normalizeSessionPath(filePath);
 		if (target !== root && !target.startsWith(`${root}/`)) {
 			throw new Error("Codex session path is outside ~/.codex/sessions");
 		}
 	}
 
-	private async readImportMeta(targetPath: string) {
-		try {
-			const raw = await readFile(targetPath, "utf8");
-			for (const line of raw.split(/\r?\n/).filter(Boolean).slice(0, 8)) {
-				const entry = JSON.parse(line) as any;
-				if (entry.type === "codex_import") {
-					return {
-						sourceMtime: Number(entry.sourceMtime),
-						sourceSize: Number(entry.sourceSize),
-					};
-				}
-			}
-		} catch {
-			return undefined;
-		}
-		return undefined;
-	}
 
-	private async collectJsonl(dir: string): Promise<string[]> {
-		const entries = await readdir(dir, { withFileTypes: true });
-		const files: string[] = [];
-		for (const entry of entries) {
-			const path = join(dir, entry.name);
-			if (entry.isDirectory()) files.push(...(await this.collectJsonl(path)));
-			else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(path);
-		}
-		return files;
-	}
 
 	private getTargetPath(projectPath: string, session: ParsedCodexSession) {
-		const id = String(session.meta.id ?? this.hash(session.sourcePath)).replace(/[^a-zA-Z0-9_-]/g, "-");
-		return join(this.getProjectSessionDir(projectPath), `codex_${id}.jsonl`);
+		const id = String(session.meta.id ?? sha1Hash(session.sourcePath)).replace(/[^a-zA-Z0-9_-]/g, "-");
+		return join(projectSessionDir(this.piRoot, projectPath), `codex_${id}.jsonl`);
 	}
 
-	private getProjectSessionDir(projectPath: string) {
-		return join(this.piRoot, this.safePathToken(projectPath));
-	}
 
-	private safePathToken(path: string) {
-		const normalized = path.replace(/\\/g, "/");
-		const win = normalized.match(/^([A-Za-z]):\/(.+)$/);
-		if (win) return `--${win[1]}--${win[2].replace(/\//g, "-")}--`;
-		return `--${normalized.replace(/^\//, "").replace(/\//g, "-")}--`;
-	}
 
 	private extractCodexText(payload: Record<string, any>) {
 		const content = payload.content ?? payload.summary ?? payload.text ?? payload.output;
@@ -416,11 +386,7 @@ export class CodexSessionImporter {
 		const output = payload.output ?? payload.content;
 		if (typeof output === "string") return output;
 		if (Array.isArray(output)) return this.extractCodexText({ content: output });
-		try {
-			return JSON.stringify(output ?? "", null, 2);
-		} catch {
-			return String(output ?? "");
-		}
+		return stringifyToolOutput(output);
 	}
 
 	private parseArguments(value: unknown) {
@@ -439,26 +405,9 @@ export class CodexSessionImporter {
 		return Number.isFinite(parsed) ? parsed : undefined;
 	}
 
-	private extractPiText(content: unknown[]) {
-		return content
-			.map((item: any) => item?.text ?? item?.thinking ?? item?.name ?? "")
-			.filter(Boolean)
-			.join(" ");
-	}
 
-	private cleanTitle(value?: string) {
-		const text = value?.replace(/\s+/g, " ").trim();
-		if (!text || /^untitled$/i.test(text)) return "";
-		return text.length > 40 ? `${text.slice(0, 40)}...` : text;
-	}
 
-	private makeId(sessionId: string, sequence: number) {
-		return this.hash(`${sessionId}:${sequence}`).slice(0, 8);
-	}
 
-	private hash(value: string) {
-		return createHash("sha1").update(value).digest("hex");
-	}
 
 	private joinText(a: string, b: string) {
 		if (!a) return b;
@@ -466,10 +415,4 @@ export class CodexSessionImporter {
 		return `${a}\n\n${b}`;
 	}
 
-	private normalize(path?: string) {
-		return String(path ?? "")
-			.replace(/\\/g, "/")
-			.replace(/\/+$/, "")
-			.toLowerCase();
-	}
 }

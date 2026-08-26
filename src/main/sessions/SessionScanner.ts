@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { app, shell } from "electron";
 import { closeSync, existsSync, openSync, readFileSync, readSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { basename as posixBasename, dirname as posixDirname, isAbsolute as posixIsAbsolute, join as posixJoin } from "node:path/posix";
 import type { ChatMessage, ChatRole, SessionSummary } from "../../shared/types";
@@ -10,6 +10,7 @@ import { getCodexSessionThreadInfo } from "../../shared/codexSessionMeta";
 import { extractMessageText, extractThinkingRaw } from "../pi/messageContent";
 import { toWslLinuxPath, type WslEnvironment } from "../wsl/WslPaths";
 import { SessionSummaryCache, type SessionFileVersion } from "./sessionSummaryCache";
+import { collectJsonlFiles } from "./importerShared";
 
 export class SessionScanner {
   private readonly root = join(app.getPath("home"), ".pi", "agent", "sessions");
@@ -406,7 +407,7 @@ export class SessionScanner {
     const all: string[] = [];
     const seen = new Set<string>();
     for (const root of roots) {
-      const files = await this.collectJsonl(root).catch(() => [] as string[]);
+      const files = await collectJsonlFiles(root).catch(() => [] as string[]);
       for (const file of files) {
         const key = this.normalize(file);
         if (seen.has(key)) continue;
@@ -833,19 +834,6 @@ export class SessionScanner {
 
   private escapeHtml(value: string) {
     return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;");
-  }
-
-  private async collectJsonl(dir: string): Promise<string[]> {
-    const entries = await readdir(dir, { withFileTypes: true });
-    const files: string[] = [];
-
-    for (const entry of entries) {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) files.push(...await this.collectJsonl(path));
-      else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(path);
-    }
-
-    return files;
   }
 
   /**

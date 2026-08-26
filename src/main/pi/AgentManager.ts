@@ -897,15 +897,7 @@ export class AgentManager {
 						});
 					})
 					.catch((error) => {
-						const list = this.messages.get(id) ?? [];
-						const loadingMessage = list.find((message) => message.meta?.historyLoading === true);
-						if (loadingMessage) {
-							loadingMessage.role = "error";
-							loadingMessage.text = "历史会话加载失败，可继续使用当前 Agent 或重新打开会话重试。";
-							loadingMessage.meta = { historyLoading: "failed" };
-							loadingMessage.timestamp = Date.now();
-							this.scheduleMessageEmit(id, true);
-						}
+						this.markHistoryLoadFailed(id);
 						void this.appLogger?.warn("agent", "Agent history background load failed", {
 							agentId: id,
 							error: error instanceof Error ? error.message : String(error),
@@ -930,15 +922,7 @@ export class AgentManager {
 						});
 					})
 					.catch((error) => {
-						const list = this.messages.get(id) ?? [];
-						const loadingMessage = list.find((message) => message.meta?.historyLoading === true);
-						if (loadingMessage) {
-							loadingMessage.role = "error";
-							loadingMessage.text = "历史会话加载失败，可继续使用当前 Agent 或重新打开会话重试。";
-							loadingMessage.meta = { historyLoading: "failed" };
-							loadingMessage.timestamp = Date.now();
-							this.scheduleMessageEmit(id, true);
-						}
+						this.markHistoryLoadFailed(id);
 						void this.appLogger?.warn("agent", "Agent recent history file load failed", {
 							agentId: id,
 							sessionPath: input.sessionPath,
@@ -4683,6 +4667,21 @@ export class AgentManager {
 		this.recentlyAborted.delete(agentId);
 		this.thinkingEmitter.cancel(agentId);
 		this.cancelMessageEmit(agentId);
+	}
+
+	/**
+	 * 把「历史加载中」的占位消息就地改写为错误提示。
+	 * 后台加载历史有 rpc / 会话文件两条路径，两者失败后的用户可见反馈必须一致。
+	 */
+	private markHistoryLoadFailed(agentId: string) {
+		const list = this.messages.get(agentId) ?? [];
+		const loadingMessage = list.find((message) => message.meta?.historyLoading === true);
+		if (!loadingMessage) return;
+		loadingMessage.role = "error";
+		loadingMessage.text = "历史会话加载失败，可继续使用当前 Agent 或重新打开会话重试。";
+		loadingMessage.meta = { historyLoading: "failed" };
+		loadingMessage.timestamp = Date.now();
+		this.scheduleMessageEmit(agentId, true);
 	}
 
 	private scheduleMessageEmit(agentId: string, immediate = false) {

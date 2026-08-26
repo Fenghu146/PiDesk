@@ -1,5 +1,5 @@
 import type { PiDesktopApi } from "../../preload";
-import { createDefaultExternalEditorSettings } from "../../shared/types";
+import { createDefaultAppSettings } from "../../shared/defaultSettings";
 import type {
 	AgentTab,
 	AppSettings,
@@ -119,66 +119,11 @@ const terminalDataListeners = new Set<(payload: TerminalDataEvent) => void>();
 const terminalExitListeners = new Set<(payload: TerminalExitEvent) => void>();
 
 let previewSettings: AppSettings = {
+	...createDefaultAppSettings(),
+	// 预览态差异：默认使用系统标题栏、跳过环境检测、不预填 commit 提示词
 	useNativeTitleBar: true,
-	showNativeMenu: false,
-	sendShortcut: "enter-send",
-	theme: "system",
-	lightBackground: "white",
-	language: "system",
-	startupWindowMode: "maximized",
 	piEnvironmentChecked: true,
-	enableGitManagement: true,
 	gitCommitMessagePrompt: "",
-	closeToTray: true,
-	singleInstance: true,
-	enableNotifications: true,
-	// showThinking 由 pi agent 的 hideThinkingBlock 控制，运行时从主进程加载
-	showThinking: true,
-	showDevTools: false,
-	electronChromiumSandbox: false,
-	piProxyEnabled: false,
-	piProxyUrl: "http://127.0.0.1:7890",
-	piProxyBypass: "localhost,127.0.0.1,::1",
-	desktopProxyEnabled: false,
-	desktopProxyUrl: "http://127.0.0.1:7890",
-	desktopProxyBypass: "localhost,127.0.0.1,::1",
-	customPiPath: "",
-	wslEnabled: false,
-	wslDistro: "Ubuntu",
-	wslUser: "root",
-	telemetryEnabled: true,
-	webServiceEnabled: false,
-	webServiceHost: "0.0.0.0",
-	webServicePort: 8765,
-	rpcTimeout: 600_000,
-	linkOpenMode: "external",
-	contentMaxWidth: 1400,
-	maxEditorFileSizeMB: 5,
-	externalEditors: createDefaultExternalEditorSettings(),
-
-	// 桌面宠物默认关闭
-	petEnabled: false,
-	petId: "clawd",
-	petAlwaysOnTop: true,
-	petScale: 0.8,
-	petPatrolEnabled: true,
-	petPatrolPauseMin: 5,
-	favoriteModels: [],
-
-	fontSize: "default",
-	uiFontSize: null,
-	chatFontSize: null,
-	inputFontSize: null,
-	zoomFactor: 1,
-	fontFamilyBase: "system",
-	fontFamilyBaseCustom: "",
-	fontFamilyMono: "commit-mono",
-	fontFamilyMonoCustom: "",
-	removedBuiltInExtensions: [],
-	disableUpdateCheck: false,
-	piRpcOffline: true,
-	piRpcNoExtensions: false,
-	piRpcNoSkills: false,
 };
 
 export function createPreviewApi(): PiDesktopApi {

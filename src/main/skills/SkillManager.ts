@@ -19,6 +19,7 @@ import type {
 	PiSkillSummary,
 } from "../../shared/types";
 import type { WslEnvironment } from "../wsl/WslPaths";
+import { parseFrontmatter, setFrontmatterBoolean, setFrontmatterName } from "../fs/frontmatter";
 
 const SKILL_FILE = "SKILL.md";
 
@@ -93,7 +94,7 @@ export class SkillManager {
 	async toggle(skillPath: string, enabled: boolean): Promise<PiSkillSummary> {
 		const skill = await this.findByPath(skillPath);
 		const raw = await readFile(skill.path, "utf8");
-		const next = this.setFrontmatterBoolean(raw, "disable-model-invocation", !enabled);
+		const next = setFrontmatterBoolean(raw, "disable-model-invocation", !enabled);
 		await writeFile(skill.path, next, "utf8");
 		return this.findByPath(skill.path);
 	}
@@ -184,7 +185,7 @@ export class SkillManager {
 		type: PiSkillSummary["type"],
 	): Promise<PiSkillSummary> {
 		const raw = await readFile(skillPath, "utf8").catch(() => "");
-		const frontmatter = this.parseFrontmatter(raw);
+		const frontmatter = parseFrontmatter(raw);
 		const name = String(frontmatter.name ?? "").trim();
 		const description = String(frontmatter.description ?? "").trim();
 		const warnings = this.validateSkill(name, description);
@@ -203,34 +204,7 @@ export class SkillManager {
 		};
 	}
 
-	private parseFrontmatter(raw: string) {
-		const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-		const result: Record<string, string> = {};
-		if (!match) return result;
-		for (const line of match[1].split(/\r?\n/)) {
-			const index = line.indexOf(":");
-			if (index === -1) continue;
-			const key = line.slice(0, index).trim();
-			let value = line.slice(index + 1).trim();
-			value = value.replace(/^['\"]|['\"]$/g, "");
-			if (key) result[key] = value;
-		}
-		return result;
-	}
 
-	private setFrontmatterBoolean(raw: string, key: string, value: boolean) {
-		const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-		if (!match) return `---\n${key}: ${value}\n---\n\n${raw}`;
-		const lines = match[1].split(/\r?\n/);
-		let changed = false;
-		const nextLines = lines.map((line) => {
-			if (!line.trim().startsWith(`${key}:`)) return line;
-			changed = true;
-			return `${key}: ${value}`;
-		});
-		if (!changed) nextLines.push(`${key}: ${value}`);
-		return raw.replace(match[0], `---\n${nextLines.join("\n")}\n---`);
-	}
 
 	private validateSkill(name: string, description: string) {
 		const warnings: string[] = [];
@@ -260,7 +234,7 @@ export class SkillManager {
 
 		// 更新 SKILL.md 中的 name frontmatter
 		const raw = await readFile(skill.path, "utf8");
-		const updated = this.setFrontmatterName(raw, displayName);
+		const updated = setFrontmatterName(raw, displayName);
 		await writeFile(skill.path, updated, "utf8");
 
 		await rename(oldDir, newDir);
@@ -277,17 +251,6 @@ export class SkillManager {
 		return reloaded;
 	}
 
-	/** 更新 frontmatter 中的 name 字段 */
-	private setFrontmatterName(raw: string, name: string): string {
-		const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-		if (!match) return `---\nname: ${name}\n---\n\n${raw}`;
-		const lines = match[1].split(/\r?\n/);
-		const nextLines = lines.map((line) => {
-			if (line.trim().startsWith("name:")) return `name: ${name}`;
-			return line;
-		});
-		return raw.replace(match[0], `---\n${nextLines.join("\n")}\n---`);
-	}
 
 	/** 规范化 Skill 名称：保留 Unicode 字母（含中文等）、数字和连字符 */
 	private normalizeSkillName(value: string) {

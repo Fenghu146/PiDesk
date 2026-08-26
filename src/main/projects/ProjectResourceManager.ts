@@ -9,6 +9,7 @@ import type {
 	Project,
 	ProjectResourceListResult,
 } from "../../shared/types";
+import { parseFrontmatter, setFrontmatterBoolean, setFrontmatterName } from "../fs/frontmatter";
 
 const SKILL_FILE = "SKILL.md";
 
@@ -82,7 +83,7 @@ export class ProjectResourceManager {
 		const skill = await this.findSkill(project, skillPath);
 		this.assertInsideProject(project, skill.path);
 		const raw = await readFile(skill.path, "utf8");
-		const next = this.setFrontmatterBoolean(raw, "disable-model-invocation", !enabled);
+		const next = setFrontmatterBoolean(raw, "disable-model-invocation", !enabled);
 		await writeFile(skill.path, next, "utf8");
 		// 重新读取文件，获取最新 frontmatter 状态
 		return this.readSkill(skill.path, this.skillLocations(project).find((l) => l.id === skill.sourceId) ?? this.skillLocations(project)[0], skill.type);
@@ -156,7 +157,7 @@ export class ProjectResourceManager {
 		type: PiSkillSummary["type"],
 	): Promise<PiSkillSummary> {
 		const raw = await readFile(skillPath, "utf8").catch(() => "");
-		const frontmatter = this.parseFrontmatter(raw);
+		const frontmatter = parseFrontmatter(raw);
 		const name = String(frontmatter.name ?? "").trim();
 		const description = String(frontmatter.description ?? "").trim();
 		const warnings = this.validateSkill(name, description);
@@ -255,7 +256,7 @@ export class ProjectResourceManager {
 
 		// 更新 SKILL.md 中的 name frontmatter
 		const raw = await readFile(skill.path, "utf8");
-		const updated = this.setFrontmatterName(raw, displayName);
+		const updated = setFrontmatterName(raw, displayName);
 		await writeFile(skill.path, updated, "utf8");
 
 		await rename(oldDir, newDir);
@@ -265,17 +266,6 @@ export class ProjectResourceManager {
 		return this.readSkill(newSkillPath, this.skillLocations(project).find((l) => newSkillPath.startsWith(l.path)) ?? this.skillLocations(project)[0], skill.type);
 	}
 
-	/** 更新 frontmatter 中的 name 字段 */
-	private setFrontmatterName(raw: string, name: string): string {
-		const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-		if (!match) return `---\nname: ${name}\n---\n\n${raw}`;
-		const lines = match[1].split(/\r?\n/);
-		const nextLines = lines.map((line) => {
-			if (line.trim().startsWith("name:")) return `name: ${name}`;
-			return line;
-		});
-		return raw.replace(match[0], `---\n${nextLines.join("\n")}\n---`);
-	}
 
 	private async findSkill(project: Project, skillPath: string) {
 		const skill = (await this.listSkills(project)).find((item) => item.path === skillPath);
@@ -293,20 +283,6 @@ export class ProjectResourceManager {
 		}
 	}
 
-	private parseFrontmatter(raw: string) {
-		const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-		const result: Record<string, string> = {};
-		if (!match) return result;
-		for (const line of match[1].split(/\r?\n/)) {
-			const index = line.indexOf(":");
-			if (index === -1) continue;
-			const key = line.slice(0, index).trim();
-			let value = line.slice(index + 1).trim();
-			value = value.replace(/^[\'"]|[\'"]$/g, "");
-			if (key) result[key] = value;
-		}
-		return result;
-	}
 
 	private validateSkill(name: string, description: string) {
 		const warnings: string[] = [];
@@ -320,19 +296,6 @@ export class ProjectResourceManager {
 		return warnings;
 	}
 
-	private setFrontmatterBoolean(raw: string, key: string, value: boolean) {
-		const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-		if (!match) return `---\n${key}: ${value}\n---\n\n${raw}`;
-		const lines = match[1].split(/\r?\n/);
-		let changed = false;
-		const nextLines = lines.map((line) => {
-			if (!line.trim().startsWith(`${key}:`)) return line;
-			changed = true;
-			return `${key}: ${value}`;
-		});
-		if (!changed) nextLines.push(`${key}: ${value}`);
-		return raw.replace(match[0], `---\n${nextLines.join("\n")}\n---`);
-	}
 
 	private normalizeSkillName(value: string) {
 		return value.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");

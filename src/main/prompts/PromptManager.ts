@@ -9,6 +9,7 @@ import type {
 	PiPromptTemplateSummary,
 } from "../../shared/types";
 import type { WslEnvironment } from "../wsl/WslPaths";
+import { parseFrontmatter } from "../fs/frontmatter";
 
 function makeBuiltinContent(name: string, body: string): string {
 	return `---\ndescription: ${name}\n---\n\n${body}`;
@@ -198,7 +199,7 @@ export class PromptManager {
 			if (!raw) continue;
 
 			const name = basename(entry, ".md");
-			const frontmatter = this.parseFrontmatter(raw);
+			const frontmatter = parseFrontmatter(raw);
 			const description = frontmatter.description ?? raw.split(/\r?\n/).find((line) => line.trim()) ?? "";
 
 			templates.push({
@@ -269,7 +270,7 @@ export class PromptManager {
 			const raw = await readFile(fullPath, "utf8").catch(() => "");
 			if (!raw) continue;
 			const name = basename(entry, ".md");
-			const frontmatter = this.parseFrontmatter(raw);
+			const frontmatter = parseFrontmatter(raw);
 			const description = frontmatter.description ?? raw.split(/\r?\n/).find((line) => line.trim()) ?? "";
 
 			templates.push({
@@ -340,20 +341,6 @@ export class PromptManager {
 		await writeFile(filePath, content, "utf8");
 	}
 
-	private parseFrontmatter(raw: string): Record<string, string> {
-		const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-		const result: Record<string, string> = {};
-		if (!match) return result;
-		for (const line of match[1].split(/\r?\n/)) {
-			const index = line.indexOf(":");
-			if (index === -1) continue;
-			const key = line.slice(0, index).trim();
-			let value = line.slice(index + 1).trim();
-			value = value.replace(/^['\"]|['\"]$/g, "");
-			if (key) result[key] = value;
-		}
-		return result;
-	}
 
 	/** 重命名全局模板：将 <oldName>.md 重命名为 <newName>.md */
 	async rename(oldName: string, newName: string): Promise<PiPromptTemplateSummary> {
@@ -370,7 +357,7 @@ export class PromptManager {
 		await rename(oldPath, newPath);
 		// 读取新文件内容返回摘要
 		const raw = await readFile(newPath, "utf8");
-		const frontmatter = this.parseFrontmatter(raw);
+		const frontmatter = parseFrontmatter(raw);
 		const description = frontmatter.description ?? "";
 		return {
 			name: normalizedNew,
@@ -397,7 +384,7 @@ export class PromptManager {
 
 		await rename(oldPath, newPath);
 		const raw = await readFile(newPath, "utf8");
-		const frontmatter = this.parseFrontmatter(raw);
+		const frontmatter = parseFrontmatter(raw);
 		const description = frontmatter.description ?? "";
 		return {
 			name: normalizedNew,

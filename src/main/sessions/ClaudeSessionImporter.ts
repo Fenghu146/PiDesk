@@ -1,6 +1,5 @@
 import { app } from "electron";
-import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type {
 	ClaudeImportReport,
@@ -8,6 +7,17 @@ import type {
 	ClaudeImportStatus,
 	ClaudeSessionSummary,
 } from "../../shared/types";
+import {
+	cleanSessionTitle,
+	collectJsonlFiles,
+	extractPiText,
+	makeEntryId,
+	normalizeSessionPath,
+	projectSessionDir,
+	readImportMeta,
+	stringifyToolOutput,
+	zeroUsage,
+} from "./importerShared";
 
 type ParsedClaudeSession = {
 	meta: {
@@ -22,13 +32,18 @@ type ParsedClaudeSession = {
 	sourceMtime: number;
 };
 
+/** Claude 导入器写入的标记类型，用于回读判断源文件是否更新 */
+function readClaudeImportMeta(targetPath: string) {
+	return readImportMeta(targetPath, "claude_import");
+}
+
 export class ClaudeSessionImporter {
 	private readonly claudeRoot = join(app.getPath("home"), ".claude", "projects");
 	private readonly piRoot = join(app.getPath("home"), ".pi", "agent", "sessions");
 
 	async scan(projectPath: string): Promise<ClaudeSessionSummary[]> {
 		const projectDir = this.getClaudeProjectDir(projectPath);
-		const files = await this.collectJsonl(projectDir).catch(() => []);
+		const files = await collectJsonlFiles(projectDir).catch(() => []);
 		const sessions = await Promise.all(
 			files.map((file) => this.readClaudeSession(file).catch(() => null)),
 		);
@@ -61,9 +76,9 @@ export class ClaudeSessionImporter {
 		try {
 			const parsed = await this.readClaudeSession(sourcePath);
 			const targetPath = this.getTargetPath(projectPath, parsed);
-			const existing = await this.readImportMeta(targetPath);
+			const existing = await readClaudeImportMeta(targetPath);
 			const converted = this.convertToPiSession(projectPath, parsed);
-			await mkdir(this.getProjectSessionDir(projectPath), { recursive: true });
+			await mkdir(projectSessionDir(this.piRoot, projectPath), { recursive: true });
 			await writeFile(targetPath, converted.raw, "utf8");
 
 			return {
@@ -90,7 +105,7 @@ export class ClaudeSessionImporter {
 		projectPath: string,
 	): Promise<ClaudeSessionSummary> {
 		const targetPath = this.getTargetPath(projectPath, session);
-		const importMeta = await this.readImportMeta(targetPath);
+		const importMeta = await readClaudeImportMeta(targetPath);
 		const converted = this.convertToPiSession(projectPath, session);
 		const status: ClaudeImportStatus = !importMeta
 			? "new"
@@ -135,7 +150,7 @@ export class ClaudeSessionImporter {
 			timestampValue?: string,
 		) => {
 			if (content.length === 0) return;
-			const id = this.makeId(sessionId, sequence++);
+			const id = makeEntryId(sessionId, sequence++);
 			const ts = timestampValue || new Date().toISOString();
 			pushEntry({
 				type: "message",
@@ -146,17 +161,17 @@ export class ClaudeSessionImporter {
 					role,
 					content,
 					timestamp: new Date(ts).getTime(),
-					...(role === "assistant" ? { usage: this.zeroUsage() } : {}),
+					...(role === "assistant" ? { usage: zeroUsage() } : {}),
 					...extra,
 				},
 			});
 			parentId = id;
 			messageCount += 1;
 
-			const text = this.extractPiText(content).trim();
+			const text = extractPiText(content).trim();
 			if (text && !titleState.preview) titleState.preview = text.slice(0, 160);
 			if (role === "user" && text && !titleState.title) {
-				titleState.title = this.cleanTitle(text);
+				titleState.title = cleanSessionTitle(text);
 			}
 		};
 
@@ -180,7 +195,7 @@ export class ClaudeSessionImporter {
 		});
 
 		// 假设使用 Claude 模型
-		const modelChangeId = this.makeId(sessionId, sequence++);
+		const modelChangeId = makeEntryId(sessionId, sequence++);
 		pushEntry({
 			type: "model_change",
 			id: modelChangeId,
@@ -274,7 +289,7 @@ export class ClaudeSessionImporter {
 
 		const title =
 			titleState.title ||
-			this.cleanTitle(basename(session.sourcePath)) ||
+			cleanSessionTitle(basename(session.sourcePath)) ||
 			"Claude 会话";
 		lines.splice(1, 0, JSON.stringify({ sessionName: title, cwd: projectPath }));
 
@@ -286,16 +301,6 @@ export class ClaudeSessionImporter {
 		};
 	}
 
-	private zeroUsage() {
-		return {
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			totalTokens: 0,
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		};
-	}
 
 	private async readClaudeSession(filePath: string): Promise<ParsedClaudeSession> {
 		this.assertClaudeSourcePath(filePath);
@@ -330,48 +335,14 @@ export class ClaudeSessionImporter {
 	}
 
 	private assertClaudeSourcePath(filePath: string) {
-		const root = this.normalize(this.claudeRoot);
-		const target = this.normalize(filePath);
+		const root = normalizeSessionPath(this.claudeRoot);
+		const target = normalizeSessionPath(filePath);
 		if (target !== root && !target.startsWith(`${root}/`)) {
 			throw new Error("Claude session path is outside ~/.claude/projects");
 		}
 	}
 
-	private async readImportMeta(targetPath: string) {
-		try {
-			const raw = await readFile(targetPath, "utf8");
-			for (const line of raw.split(/\r?\n/).filter(Boolean).slice(0, 8)) {
-				const entry = JSON.parse(line) as any;
-				if (entry.type === "claude_import") {
-					return {
-						sourceMtime: Number(entry.sourceMtime),
-						sourceSize: Number(entry.sourceSize),
-					};
-				}
-			}
-		} catch {
-			return undefined;
-		}
-		return undefined;
-	}
 
-	private async collectJsonl(dir: string): Promise<string[]> {
-		try {
-			const entries = await readdir(dir, { withFileTypes: true });
-			const files: string[] = [];
-			for (const entry of entries) {
-				const path = join(dir, entry.name);
-				if (entry.isDirectory()) {
-					files.push(...(await this.collectJsonl(path)));
-				} else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
-					files.push(path);
-				}
-			}
-			return files;
-		} catch {
-			return [];
-		}
-	}
 
 	private getClaudeProjectDir(projectPath: string): string {
 		// 将项目路径转换为 Claude 的目录名格式
@@ -386,66 +357,28 @@ export class ClaudeSessionImporter {
 		return join(this.claudeRoot, dirName);
 	}
 
-	private getTargetPath(projectPath: string, session: ParsedClaudeSession) {
-		const id = session.meta.sessionId.replace(/[^a-zA-Z0-9_-]/g, "-");
-		return join(this.getProjectSessionDir(projectPath), `claude_${id}.jsonl`);
-	}
-
-	private getProjectSessionDir(projectPath: string) {
-		return join(this.piRoot, this.safePathToken(projectPath));
-	}
-
-	private safePathToken(path: string) {
-		const normalized = path.replace(/\\/g, "/");
-		const win = normalized.match(/^([A-Za-z]):\/(.+)$/);
-		if (win) return `--${win[1]}--${win[2].replace(/\//g, "-")}--`;
-		return `--${normalized.replace(/^\//, "").replace(/\//g, "-")}--`;
-	}
-
 	private extractToolOutput(payload: Record<string, any>) {
 		const output = payload.content ?? payload.output;
 		if (typeof output === "string") return output;
 		if (Array.isArray(output)) {
 			return output
-				.map((item) => {
-					if (typeof item === "string") return item;
-					return String(item?.text ?? item?.content ?? "");
-				})
+				.map((item) => (typeof item === "string" ? item : String(item?.text ?? item?.content ?? "")))
 				.filter(Boolean)
 				.join("\n");
 		}
-		try {
-			return JSON.stringify(output ?? "", null, 2);
-		} catch {
-			return String(output ?? "");
-		}
+		return stringifyToolOutput(output);
 	}
 
-	private extractPiText(content: unknown[]) {
-		return content
-			.map((item: any) => item?.text ?? item?.thinking ?? item?.name ?? "")
-			.filter(Boolean)
-			.join(" ");
+	private getTargetPath(projectPath: string, session: ParsedClaudeSession) {
+		const id = session.meta.sessionId.replace(/[^a-zA-Z0-9_-]/g, "-");
+		return join(projectSessionDir(this.piRoot, projectPath), `claude_${id}.jsonl`);
 	}
 
-	private cleanTitle(value?: string) {
-		const text = value?.replace(/\s+/g, " ").trim();
-		if (!text || /^untitled$/i.test(text)) return "";
-		return text.length > 40 ? `${text.slice(0, 40)}...` : text;
-	}
 
-	private makeId(sessionId: string, sequence: number) {
-		return this.hash(`${sessionId}:${sequence}`).slice(0, 8);
-	}
 
-	private hash(value: string) {
-		return createHash("sha1").update(value).digest("hex");
-	}
 
-	private normalize(path?: string) {
-		return String(path ?? "")
-			.replace(/\\/g, "/")
-			.replace(/\/+$/, "")
-			.toLowerCase();
-	}
+
+
+
+
 }
